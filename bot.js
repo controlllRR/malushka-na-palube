@@ -89,7 +89,7 @@ bot.command('start', (ctx) => {
         '🔥 <b>Малышка на палубе</b> — только лучший продукт VHQ!\n' +
         '\n' +
         '⚠️ <b>ВНИМАНИЕ</b>\n' +
-        'По вопросам зависших платежей: @MalushkaOperator или <b>+888 0724 8219</b>\n' +
+        'По вопросам зависших платежей: @MalushkaOperator\n' +
         '\n' +
         '✅ <b>Гарантия качества и анонимности</b>\n' +
         '\n' +
@@ -592,7 +592,8 @@ Object.keys(cityDistricts).forEach(cityKey => {
       await ctx.deleteMessage();
     } catch (e) {}
     const districts = cityDistricts[cityKey];
-    const districtButtons = districts.map(d => [{ text: d, callback_data: `district_${cityKey}_${d.replace(/ |-/g, '_').toLowerCase()}` }]);
+    // Используем индекс района вместо полного названия
+    const districtButtons = districts.map((d, idx) => [{ text: d, callback_data: `district|${cityKey}|${idx}` }]);
     districtButtons.push([{ text: '⬅️ Назад к городам', callback_data: 'in_stock' }]);
     ctx.replyWithPhoto(
       { source: 'welcome.jpg' },
@@ -612,18 +613,17 @@ Object.keys(cityDistricts).forEach(cityKey => {
 });
 
 // Обработка выбора района (для всех городов)
-bot.action(/^district_.*$/, async (ctx) => {
+bot.action(/^district\|.*$/, async (ctx) => {
   try {
     await ctx.deleteMessage();
   } catch (e) {}
-  // Получаем название города и района из callback_data
+  // Получаем название города и индекс района из callback_data
   const data = ctx.match[0];
-  // Пример: district_city_moskva_центральный
-  // Отделяем всё после последнего _ как район
-  const lastUnderscore = data.lastIndexOf('_');
-  const cityKey = data.slice(8, lastUnderscore); // между 'district_' и последним '_'
-  const districtName = data.slice(lastUnderscore + 1);
-  
+  // Пример: district|city_moskva|0
+  const parts = data.split('|');
+  const cityKey = parts[1];
+  const districtIdx = parseInt(parts[2], 10);
+  const districtName = cityDistricts[cityKey][districtIdx];
   // Кнопки товаров в столбик
   const productButtons = products.map((product, index) => {
     // Минимальный размер и цена
@@ -632,10 +632,11 @@ bot.action(/^district_.*$/, async (ctx) => {
     return [
       {
         text: `${product.name} (от ${minPrice}₽)`,
-        callback_data: `product_${cityKey}_${districtName}_${index}`
+        callback_data: `product|${cityKey}|${districtIdx}|${index}`
       }
     ];
   });
+  // Кнопка назад к районам
   productButtons.push([{ text: '⬅️ Назад к районам', callback_data: cityKey }]);
 
   ctx.replyWithPhoto(
@@ -655,26 +656,27 @@ bot.action(/^district_.*$/, async (ctx) => {
 });
 
 // Обработка выбора товара
-bot.action(/^product_.*$/, async (ctx) => {
+bot.action(/^product\|.*$/, async (ctx) => {
   try {
     await ctx.deleteMessage();
   } catch (e) {}
   const data = ctx.match[0];
-  // product_citykey_districtname_index
-  const parts = data.split('_');
-  const cityKey = parts[1] + '_' + parts[2];
-  const districtName = parts.slice(3, parts.length - 1).join('_');
-  const productIndex = parseInt(parts[parts.length - 1], 10);
+  // product|cityKey|districtIdx|productIndex
+  const parts = data.split('|');
+  const cityKey = parts[1];
+  const districtIdx = parseInt(parts[2], 10);
+  const productIndex = parseInt(parts[3], 10);
+  const districtName = cityDistricts[cityKey][districtIdx];
   const product = products[productIndex];
 
   // Кнопки размеров
   const sizeButtons = product.sizes.map(size => [
     {
       text: `${size.toString().replace('.', ',')}гр`,
-      callback_data: `size|${cityKey}|${districtName}|${productIndex}|${size}`
+      callback_data: `size|${cityKey}|${districtIdx}|${productIndex}|${size}`
     }
   ]);
-  sizeButtons.push([{ text: '⬅️ Назад к товарам', callback_data: `district_${cityKey}_${districtName}` }]);
+  sizeButtons.push([{ text: '⬅️ Назад к товарам', callback_data: `district|${cityKey}|${districtIdx}` }]);
 
   ctx.replyWithPhoto(
     { source: product.photo },
@@ -698,12 +700,13 @@ bot.action(/^size\|.*$/, async (ctx) => {
     await ctx.deleteMessage();
   } catch (e) {}
   const data = ctx.match[0];
-  // size|cityKey|districtName|productIndex|size
+  // size|cityKey|districtIdx|productIndex|size
   const parts = data.split('|');
   const cityKey = parts[1];
-  const districtName = parts[2];
+  const districtIdx = parseInt(parts[2], 10);
   const productIndex = parseInt(parts[3], 10);
   const size = parseFloat(parts[4].replace(',', '.'));
+  const districtName = cityDistricts[cityKey][districtIdx];
   const product = products[productIndex];
 
   // Цена рассчитывается пропорционально
@@ -724,10 +727,10 @@ bot.action(/^size\|.*$/, async (ctx) => {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: '💳 Оформить заказ', callback_data: `order|${cityKey}|${districtName}|${productIndex}|${size}` }
+            { text: '💳 Оформить заказ', callback_data: `order|${cityKey}|${districtIdx}|${productIndex}|${size}` }
           ],
           [
-            { text: '⬅️ Назад к весам', callback_data: `product_${cityKey}_${districtName}_${productIndex}` }
+            { text: '⬅️ Назад к весам', callback_data: `product|${cityKey}|${districtIdx}|${productIndex}` }
           ]
         ]
       }
@@ -742,12 +745,13 @@ bot.action(/^order\|.*$/, async (ctx) => {
   } catch (e) {}
   
   const data = ctx.match[0];
-  // order|cityKey|districtName|productIndex|size
+  // order|cityKey|districtIdx|productIndex|size
   const parts = data.split('|');
   const cityKey = parts[1];
-  const districtName = parts[2];
+  const districtIdx = parseInt(parts[2], 10);
   const productIndex = parseInt(parts[3], 10);
   const size = parseFloat(parts[4].replace(',', '.'));
+  const districtName = cityDistricts[cityKey][districtIdx];
   const product = products[productIndex];
   const price = Math.round(product.basePrice * (size / product.baseWeight));
   const sizeDisplay = size.toString().replace('.', ',');
@@ -778,13 +782,13 @@ bot.action(/^order\|.*$/, async (ctx) => {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: '💳 Банковская карта', callback_data: `payment_card|${cityKey}|${districtName}|${productIndex}|${size}` }
+            { text: '💳 Банковская карта', callback_data: `payment_card|${cityKey}|${districtIdx}|${productIndex}|${size}` }
           ],
           [
-            { text: '₿ Биткоин', callback_data: `payment_btc|${cityKey}|${districtName}|${productIndex}|${size}` }
+            { text: '₿ Биткоин', callback_data: `payment_btc|${cityKey}|${districtIdx}|${productIndex}|${size}` }
           ],
           [
-            { text: '⬅️ Назад к товару', callback_data: `size|${cityKey}|${districtName}|${productIndex}|${size}` }
+            { text: '⬅️ Назад к товару', callback_data: `size|${cityKey}|${districtIdx}|${productIndex}|${size}` }
           ]
         ]
       }
@@ -804,7 +808,7 @@ bot.action(/^payment_card\|.*$/, async (ctx) => {
   const data = ctx.callbackQuery.data;
   const parts = data.split('|');
   const cityKey = parts[1];
-  const districtName = parts[2];
+  const districtIdx = parseInt(parts[2], 10);
   const productIndex = parseInt(parts[3], 10);
   const size = parseFloat(parts[4].replace(',', '.'));
   const product = products[productIndex];
@@ -836,7 +840,7 @@ bot.action(/^payment_card\|.*$/, async (ctx) => {
             { text: '📸 Отправить скриншот оплаты', callback_data: 'upload_payment_proof' }
           ],
           [
-            { text: '⬅️ Назад к способам оплаты', callback_data: `order|${cityKey}|${districtName}|${productIndex}|${size}` }
+            { text: '⬅️ Назад к способам оплаты', callback_data: `order|${cityKey}|${districtIdx}|${productIndex}|${size}` }
           ]
         ]
       }
@@ -856,7 +860,7 @@ bot.action(/^payment_btc\|.*$/, async (ctx) => {
   const data = ctx.callbackQuery.data;
   const parts = data.split('|');
   const cityKey = parts[1];
-  const districtName = parts[2];
+  const districtIdx = parseInt(parts[2], 10);
   const productIndex = parseInt(parts[3], 10);
   const size = parseFloat(parts[4].replace(',', '.'));
   const product = products[productIndex];
@@ -887,7 +891,7 @@ bot.action(/^payment_btc\|.*$/, async (ctx) => {
             { text: '📸 Отправить скриншот оплаты', callback_data: 'upload_payment_proof' }
           ],
           [
-            { text: '⬅️ Назад к способам оплаты', callback_data: `order|${cityKey}|${districtName}|${productIndex}|${size}` }
+            { text: '⬅️ Назад к способам оплаты', callback_data: `order|${cityKey}|${districtIdx}|${productIndex}|${size}` }
           ]
         ]
       }
